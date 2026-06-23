@@ -83,3 +83,65 @@ A: Each `SaveChanges()` call is a round trip to the database (and its own transa
 
 **Q: How did you make the 100-row seed idempotent, so re-running the app doesn't keep adding more rows?**
 A: Added `Any()` to the repository (`_context.Users.Any()`), and guarded the seed call with `if (!personRepository.Any())`. `Any()` translates to a SQL `EXISTS` query — it stops as soon as it finds one row, rather than pulling back every row just to check `Count > 0`. This is a cheap way to make a "seed data" step safe to run repeatedly, which matters since this demo uses `EnsureCreated()` instead of migrations (no built-in seed-data tracking like `HasData` + migrations would give you).
+
+## Step 4 — Splitting classes out of `Program.cs` for testability
+
+**Q: Why split `Person`, `DataContext`, and `PersonRepository` into their own files if the app behaves identically either way?**
+A: Top-level-statement files (`Program.cs` using the implicit `Main` style) implicitly make any type declared in them `internal`/file-local in practice for cross-project visibility purposes — a separate test project referencing the main project can't easily see classes nested inside another project's `Program.cs`. Splitting them into their own files and marking them `public` is what makes `PersonRepository`, `IPersonRepository`, `DataContext`, and `Person` referenceable from `EF Config.Tests` later. No behavior changes — purely about making the next step (a test project) possible.
+
+**Q: What's left in `Program.cs` after the split, and why keep anything there at all?**
+A: Only composition/wiring: building `IConfiguration` from `appsettings.json`, registering services (`AddDbContext`, `AddScoped<IPersonRepository>`), creating a `ServiceProvider`/scope, seeding, and the final read-and-print. This is the "composition root" pattern — one place in the app responsible for wiring concrete implementations to abstractions; everything else in the app should only ever depend on the abstractions (`IPersonRepository`), never construct concrete types itself.
+
+**Q: What broke when the split happened, and why?**
+A: `Program.cs` still calls `options.UseNpgsql(connectionString)` inside the `AddDbContext` registration — `UseNpgsql` is an extension method from `Microsoft.EntityFrameworkCore` (well, from the Npgsql provider package, extending a type in `Microsoft.EntityFrameworkCore`) on `DbContextOptionsBuilder`. Before the split, `Program.cs` got that `using Microsoft.EntityFrameworkCore;` "for free" because `DataContext`'s own definition (which needs `DbContext`/`DbContextOptions`) lived in the same file and had the import. After moving `DataContext` to its own file, `Program.cs` needed its own explicit `using Microsoft.EntityFrameworkCore;` — a good example of why splitting files can surface implicit dependencies that were previously hidden by file-level proximity.
+
+## Step 5 — Unit tests with the EF Core InMemory provider
+
+**Q: Why InMemory provider instead of mocking `DataContext` itself?**
+A: `DbContext`/`DbSet<T>` are notoriously hard to mock well (lots of surface area: change tracking, LINQ provider, `SaveChanges` behavior) — most attempts end up re-implementing half of EF Core badly. The InMemory provider sidesteps that: it's a real (if non-relational) EF Core provider, so `DbSet<Person>`, `Add`, `AddRange`, `SaveChanges`, and LINQ all behave through the same EF Core machinery as Postgres would, just without real SQL. You get a real `DataContext` instance, not a hand-built fake.
+
+**Q: Why does each test call `UseInMemoryDatabase(Guid.NewGuid().ToString())` instead of reusing one database name?**
+A: The InMemory provider keys a "database" by the name string passed in — reusing the same name across tests means they'd all share state (one test's seeded rows would leak into another's `Any()`/`GetAll()` assertions), and test outcomes would depend on run order. A fresh GUID per test gives full isolation, the same property a real integration test would get from a fresh container/schema per run.
+
+**Q: Didn't you say `IPersonRepository` exists so you can swap in a fake during tests — why does `PersonRepositoryTests` use the real `PersonRepository`, not a fake?**
+A: Those are two different layers being tested. `IPersonRepository` is the seam *above* the repository — useful when something that *depends on* `IPersonRepository` (e.g. a future business-logic/service layer) needs a fake collaborator so its own logic can be tested in isolation, without a database at all. `PersonRepositoryTests` is testing the repository itself — there's nothing to fake here, the InMemory provider stands in for the database layer underneath it instead.
+
+**Q: Why pin `FluentAssertions` to `7.0.0` instead of using the latest version?**
+A: FluentAssertions changed its license starting with v8 — v8+ requires a paid commercial license for for-profit use, while the v7.x line (and everything before it) remains free under the Apache 2.0 license. For a demo/interview project there's no commercial entanglement either way, but pinning to 7.x avoids introducing a licensing question at all, and is worth knowing as a "watch your dependency licenses" talking point — `dotnet add package` defaults to latest, which silently would have pulled in v8.
+
+**Q: What would change to add an integration-level test against real Postgres later (Step 6)?**
+A: Swap `UseInMemoryDatabase(...)` for `UseNpgsql(...)` pointed at a real connection string (ideally a Testcontainers-managed disposable Postgres container, not a shared dev database), and call `context.Database.EnsureCreated()` once per test run to materialize the schema. The test bodies calling into `PersonRepository` wouldn't need to change at all — that's the same provider-abstraction benefit from Step 3 showing up again, just now in tests instead of `Program.cs`.
+
+## Step 6 — Integration tests against real Postgres via Testcontainers
+
+**Q: What is Testcontainers, and what problem does it solve here?**
+A: A library that programmatically starts and stops real Docker containers from inside test code, scoped to a test run's lifetime. Instead of requiring a shared, manually-maintained "test database" that tests have to coordinate around (and that can drift or get polluted), each test class gets its own disposable, throwaway Postgres instance, started fresh and destroyed afterward. It turns "you need a real database for this test" from an infrastructure/coordination problem into a few lines of test setup code.
+
+**Q: Why implement `IAsyncLifetime` instead of starting the container in a constructor?**
+A: Starting a container is an async, potentially slow operation (pulling the image, waiting for Postgres to accept connections) — xUnit constructors can't be `async`. `IAsyncLifetime.InitializeAsync()` is xUnit's hook for async setup before each test class's tests run, and `DisposeAsync()` is the matching async teardown. Doing this in a constructor would force blocking on async code (`.Result`/`.Wait()`), which risks deadlocks and is exactly the anti-pattern async/await exists to avoid.
+
+**Q: Did you need to worry about port conflicts with the Postgres instance already installed locally?**
+A: No — Testcontainers binds each container to a random free host port rather than the image's default port (5432), then exposes the actual resolved port through `GetConnectionString()`. Confirmed in practice: a local Postgres install can be sitting on 5432 the whole time, and the Testcontainers-managed container runs alongside it without collision, because the test never hardcodes 5432 — it always asks Testcontainers for the live connection string.
+
+**Q: Why does this project use `EnsureCreated()` here too, instead of real migrations, given migrations are "the production-appropriate approach" per Step 1?**
+A: Consistency with how `Program.cs` itself initializes the schema (also `EnsureCreated()`, no migrations exist in this demo) — the integration test is meant to validate the same code path the app actually uses, not introduce a different schema-creation mechanism that the app doesn't have. If migrations were added to the main project, the integration test would switch to `context.Database.Migrate()` to stay representative of production behavior.
+
+**Q: Why a separate `[Trait("Category", "Integration")]` and a separate `EF Config.IntegrationTests` project, instead of just adding these tests to `EF Config.Tests`?**
+A: Two different concerns: speed and environment dependency. Unit tests (InMemory provider) run in milliseconds with zero external dependencies — they're meant to run on every save/build. Integration tests need Docker, pull an image on first run, and take seconds per test (container startup dominates). Separating projects/traits lets CI (or a developer locally) choose to run only the fast tests during normal iteration, and gate the slower, Docker-dependent ones to PR/merge checks — `dotnet test --filter Category!=Integration` for the fast loop, full `dotnet test "EF Config.slnx"` for the complete signal.
+
+**Q: What does this integration test actually catch that the InMemory-provider unit tests in Step 5 couldn't?**
+A: Real Npgsql SQL generation and type mapping — e.g. it proves `UseNpgsql` + the `Person`/`DataContext` mapping genuinely produces valid Postgres DDL/DML, not just "valid EF Core LINQ that some provider can satisfy." The InMemory provider doesn't validate SQL translation at all; it's a different (non-relational) provider implementing the same abstractions, so it can hide bugs that only manifest against a real relational backend (e.g. the `DateTime`/`timestamp with time zone` UTC-handling gotcha mentioned under Step 3 — InMemory wouldn't flag that, real Postgres would).
+
+## Step 7 — CI pipeline (GitHub Actions)
+
+**Q: Why doesn't `ci.yml` define a `postgres:16` service container, if integration tests need real Postgres?**
+A: Because `EF Config.IntegrationTests` already manages its own Postgres via Testcontainers (Step 6) — it talks to the Docker daemon directly to start a disposable container per test class and reads the connection string back from Testcontainers itself, never from `IConfiguration`/an env var. A GitHub Actions service container is a different mechanism (the runner pre-starts a container alongside the job and exposes it on a fixed port) that nothing in this codebase is wired to consume. Adding one would just be an extra, unused Postgres instance running in CI — `ubuntu-latest` runners already ship Docker, which is the only prerequisite Testcontainers actually needs.
+
+**Q: When *would* you reach for a GitHub Actions service container instead of (or alongside) Testcontainers?**
+A: When the thing under test is the application itself reading a real `ConnectionStrings__AppConnectionString` from configuration — e.g. a smoke test that runs `Program.cs`'s actual startup path end-to-end in CI. Testcontainers is ideal *inside* test code that wants full lifecycle control (start fresh, assert, tear down, possibly multiple containers per run). A service container is simpler when you just need "a database listening on a known port for the whole job" and don't need test code to manage its lifecycle.
+
+**Q: Why split the unit and integration test runs into two separate `dotnet test` steps instead of one `dotnet test "EF Config.slnx"` call?**
+A: Two practical reasons. First, a failed step is individually visible in the GitHub Actions log/UI — "Unit tests" vs "Integration tests" failing tells you immediately which category broke, rather than parsing one combined test-runner summary. Second, it leaves room to later run them on different triggers cheaply (e.g. unit tests on every push, integration tests only on `pull_request`, to save CI minutes) by editing just one step instead of restructuring a single combined command.
+
+**Q: This demo has no secrets in CI for the database — why mention secrets handling at all?**
+A: Because that won't stay true once anything beyond Testcontainers-managed throwaway databases is involved — e.g. a CD job that needs to apply migrations against a real staging database, or an integration test against a long-lived shared instance instead of a disposable container. The pattern to reach for then is the same one already used locally: `IConfiguration`'s env-var override (`ConnectionStrings__AppConnectionString`), sourced from GitHub Actions Secrets in CI instead of `appsettings.Local.json` locally — same configuration system, different source, never committed to the repo either way.

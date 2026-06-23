@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    # No Postgres service container needed: EF Config.IntegrationTests uses
+    # Testcontainers, which starts its own disposable postgres:16 container
+    # directly via the Docker daemon already present on ubuntu runners.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore "EF Config.slnx"
+
+      - name: Build
+        run: dotnet build "EF Config.slnx" --no-restore -c Release
+
+      - name: Unit tests (fast, no external dependencies)
+        run: dotnet test "EF Config.Tests/EF Config.Tests.csproj" --no-build -c Release --collect:"XPlat Code Coverage"
+
+      - name: Integration tests (Testcontainers-managed Postgres)
+        run: dotnet test "EF Config.IntegrationTests/EF Config.IntegrationTests.csproj" --no-build -c Release --collect:"XPlat Code Coverage"

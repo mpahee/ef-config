@@ -1,3 +1,5 @@
 <Solution>
   <Project Path="EF Config/EF Config.csproj" />
+  <Project Path="EF Config.Tests/EF Config.Tests.csproj" />
+  <Project Path="EF Config.IntegrationTests/EF Config.IntegrationTests.csproj" />
 </Solution>
