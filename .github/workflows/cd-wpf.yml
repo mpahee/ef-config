@@ -65,8 +65,36 @@ jobs:
           Compress-Archive -Path "publish/EF-Config-Wpf/*" -DestinationPath $zipName
           "zip_name=$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
+      - name: Write release notes
+        shell: pwsh
+        run: |
+          @"
+          ## Running this build
+
+          This is an **unsigned** app, so Windows SmartScreen will likely show
+          "Windows protected your PC" the first time you run the .exe. Click
+          **More info > Run anyway** to proceed - this is expected for any
+          unsigned downloaded executable and is not a sign anything is wrong.
+
+          `EF Config.Wpf.exe` only ships with a placeholder
+          `appsettings.json` (`Username=CHANGE_ME`). To connect to a real
+          Postgres database, create an `appsettings.Local.json` next to the
+          .exe with your real connection string, e.g.:
+
+          ```json
+          {
+            "ConnectionStrings": {
+              "AppConnectionString": "Host=localhost;Port=5432;Database=AppDataBaseInterview;Username=postgres;Password=postgres"
+            }
+          }
+          ```
+
+          If the app can't connect, it now shows a startup error dialog
+          explaining the likely cause instead of crashing silently.
+          "@ | Out-File -FilePath release-notes.md -Encoding utf8
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
-        run: gh release create "${{ steps.version.outputs.tag }}" "${{ steps.zip.outputs.zip_name }}" --title "EF Config WPF ${{ steps.version.outputs.tag }}" --generate-notes
+        run: gh release create "${{ steps.version.outputs.tag }}" "${{ steps.zip.outputs.zip_name }}" --title "EF Config WPF ${{ steps.version.outputs.tag }}" --notes-file release-notes.md --generate-notes
