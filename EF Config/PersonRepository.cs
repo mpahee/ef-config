@@ -6,6 +6,8 @@ public interface IPersonRepository
     List<Person> GetAll();
     void Add(Person person);
     void AddRange(IEnumerable<Person> people);
+    void Update(Person person);
+    void Delete(Person person);
     bool Any();
 }
 
@@ -53,6 +55,22 @@ public class PersonRepository : IPersonRepository
         // trip/transaction instead of one round trip per row (avoids the
         // classic "N+1 SaveChanges" mistake of looping Add()+SaveChanges()).
         _context.Users.AddRange(people);
+        _context.SaveChanges();
+    }
+
+    public void Update(Person person)
+    {
+        // Update() marks every property as Modified, not just the ones that
+        // actually changed - fine for a small POCO like Person, but worth
+        // knowing it's a coarser-grained alternative to mutating a tracked
+        // entity's properties directly and letting EF Core detect changes.
+        _context.Users.Update(person);
+        _context.SaveChanges();
+    }
+
+    public void Delete(Person person)
+    {
+        _context.Users.Remove(person);
         _context.SaveChanges();
     }
 }

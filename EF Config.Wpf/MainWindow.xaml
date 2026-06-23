@@ -1,0 +1,42 @@
+<Window x:Class="EF_Config.Wpf.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:EF_Config.Wpf"
+        mc:Ignorable="d"
+        Title="EF Config - Person CRUD" Height="500" Width="800">
+    <Grid Margin="10">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="220" />
+        </Grid.ColumnDefinitions>
+
+        <DataGrid Grid.Column="0"
+                  ItemsSource="{Binding People}"
+                  SelectedItem="{Binding SelectedPerson, Mode=TwoWay}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  CanUserAddRows="False"
+                  Margin="0,0,10,0">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Id" Binding="{Binding PersonId}" Width="50" />
+                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*" />
+                <DataGridTextColumn Header="Address" Binding="{Binding Address}" Width="*" />
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <StackPanel Grid.Column="1">
+            <TextBlock Text="Name" Margin="0,0,0,2" />
+            <TextBox Text="{Binding EditingName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
+
+            <TextBlock Text="Address" Margin="0,0,0,2" />
+            <TextBox Text="{Binding EditingAddress, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
+
+            <Button Content="Add" Command="{Binding AddCommand}" Margin="0,0,0,5" Padding="0,4" />
+            <Button Content="Update" Command="{Binding UpdateCommand}" Margin="0,0,0,5" Padding="0,4" />
+            <Button Content="Delete" Command="{Binding DeleteCommand}" Margin="0,0,0,5" Padding="0,4" />
+            <Button Content="Refresh" Command="{Binding RefreshCommand}" Padding="0,4" />
+        </StackPanel>
+    </Grid>
+</Window>

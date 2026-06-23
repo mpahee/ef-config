@@ -10,6 +10,11 @@ jobs:
     # No Postgres service container needed: EF Config.IntegrationTests uses
     # Testcontainers, which starts its own disposable postgres:16 container
     # directly via the Docker daemon already present on ubuntu runners.
+    #
+    # Restore/build/test target specific .csproj files rather than the whole
+    # "EF Config.slnx" - the solution also contains EF Config.Wpf and
+    # EF Config.Wpf.Tests (net10.0-windows, UseWPF), which cannot build on a
+    # Linux runner. Those are covered by the build-and-test-wpf job below.
 
     steps:
       - uses: actions/checkout@v4
@@ -19,13 +24,44 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Restore
-        run: dotnet restore "EF Config.slnx"
+        run: |
+          dotnet restore "EF Config/EF Config.csproj"
+          dotnet restore "EF Config.Tests/EF Config.Tests.csproj"
+          dotnet restore "EF Config.IntegrationTests/EF Config.IntegrationTests.csproj"
 
       - name: Build
-        run: dotnet build "EF Config.slnx" --no-restore -c Release
+        run: |
+          dotnet build "EF Config/EF Config.csproj" --no-restore -c Release
+          dotnet build "EF Config.Tests/EF Config.Tests.csproj" --no-restore -c Release
+          dotnet build "EF Config.IntegrationTests/EF Config.IntegrationTests.csproj" --no-restore -c Release
 
       - name: Unit tests (fast, no external dependencies)
         run: dotnet test "EF Config.Tests/EF Config.Tests.csproj" --no-build -c Release --collect:"XPlat Code Coverage"
 
       - name: Integration tests (Testcontainers-managed Postgres)
         run: dotnet test "EF Config.IntegrationTests/EF Config.IntegrationTests.csproj" --no-build -c Release --collect:"XPlat Code Coverage"
+
+  build-and-test-wpf:
+    runs-on: windows-latest
+    # EF Config.Wpf / EF Config.Wpf.Tests target net10.0-windows with
+    # UseWPF=true - these can only build on a Windows runner.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: |
+          dotnet restore "EF Config.Wpf/EF Config.Wpf.csproj"
+          dotnet restore "EF Config.Wpf.Tests/EF Config.Wpf.Tests.csproj"
+
+      - name: Build
+        run: |
+          dotnet build "EF Config.Wpf/EF Config.Wpf.csproj" --no-restore -c Release
+          dotnet build "EF Config.Wpf.Tests/EF Config.Wpf.Tests.csproj" --no-restore -c Release
+
+      - name: ViewModel unit tests
+        run: dotnet test "EF Config.Wpf.Tests/EF Config.Wpf.Tests.csproj" --no-build -c Release --collect:"XPlat Code Coverage"
