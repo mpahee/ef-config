@@ -15,8 +15,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest" Condition="Exists('appsettings.Local.json')" />
+    <!-- CopyToPublishDirectory="Never": this project is never itself
+         published by CD (only EF Config.Wpf is) - without this, these items
+         flow transitively into EF Config.Wpf's publish output via the
+         ProjectReference and collide with its own same-named appsettings
+         files (NETSDK1152). Build-time behavior (CopyToOutputDirectory) is
+         unaffected, so `dotnet build`/`dotnet run` for this console app
+         still work exactly as before. -->
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
+    <None Update="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" Condition="Exists('appsettings.Local.json')" />
   </ItemGroup>
 
 </Project>

@@ -24,4 +24,12 @@
     <UseWPF>true</UseWPF>
   </PropertyGroup>
 
+  <!-- No RuntimeIdentifier/SelfContained set here deliberately: setting
+       SelfContained=true at the project level breaks plain `dotnet build`
+       (NETSDK1150 - a self-contained executable can't reference the
+       non-self-contained executable project EF Config.csproj). Publish-time
+       RID/self-contained behavior is supplied entirely via CLI flags on
+       `dotnet publish` in .github/workflows/cd-wpf.yml instead, so normal
+       build/test runs are unaffected. -->
+
 </Project>

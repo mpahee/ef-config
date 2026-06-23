@@ -1,0 +1,72 @@
+name: CD - WPF Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  test-wpf:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: |
+          dotnet restore "EF Config.Wpf/EF Config.Wpf.csproj"
+          dotnet restore "EF Config.Wpf.Tests/EF Config.Wpf.Tests.csproj"
+
+      - name: Build
+        run: |
+          dotnet build "EF Config.Wpf/EF Config.Wpf.csproj" --no-restore -c Release
+          dotnet build "EF Config.Wpf.Tests/EF Config.Wpf.Tests.csproj" --no-restore -c Release
+
+      - name: ViewModel unit tests
+        run: dotnet test "EF Config.Wpf.Tests/EF Config.Wpf.Tests.csproj" --no-build -c Release
+
+  publish-and-release:
+    needs: test-wpf
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Compute version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag -replace '^v', ''
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      # -r/--self-contained passed on the CLI rather than baked into the
+      # csproj: SelfContained=true at the project level breaks plain
+      # `dotnet build` (NETSDK1150 - a self-contained exe can't reference
+      # the non-self-contained EF Config.csproj exe project).
+      - name: Publish
+        run: dotnet publish "EF Config.Wpf/EF Config.Wpf.csproj" -c Release -r win-x64 --self-contained true -p:Version=${{ steps.version.outputs.version }} -o publish/EF-Config-Wpf
+
+      - name: Zip publish output
+        id: zip
+        shell: pwsh
+        run: |
+          $zipName = "EF-Config-Wpf-${{ steps.version.outputs.tag }}-win-x64.zip"
+          Compress-Archive -Path "publish/EF-Config-Wpf/*" -DestinationPath $zipName
+          "zip_name=$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: gh release create "${{ steps.version.outputs.tag }}" "${{ steps.zip.outputs.zip_name }}" --title "EF Config WPF ${{ steps.version.outputs.tag }}" --generate-notes
