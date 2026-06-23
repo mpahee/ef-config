@@ -65,10 +65,15 @@ jobs:
           Compress-Archive -Path "publish/EF-Config-Wpf/*" -DestinationPath $zipName
           "zip_name=$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
+      # Single-quoted here-string (@'...'@), not double-quoted (@"..."@):
+      # double-quoted here-strings still process backtick escape sequences
+      # (e.g. `a` -> BEL), which silently mangled backticks used here for
+      # markdown inline code/fences. Single-quoted treats everything
+      # literally - safe here since this block has no variables to expand.
       - name: Write release notes
         shell: pwsh
         run: |
-          @"
+          @'
           ## Running this build
 
           This is an **unsigned** app, so Windows SmartScreen will likely show
@@ -91,7 +96,7 @@ jobs:
 
           If the app can't connect, it now shows a startup error dialog
           explaining the likely cause instead of crashing silently.
-          "@ | Out-File -FilePath release-notes.md -Encoding utf8
+          '@ | Out-File -FilePath release-notes.md -Encoding utf8
 
       - name: Create GitHub Release
         env:
